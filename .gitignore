@@ -1,0 +1,39 @@
+# Secrets — 永不提交
+.env
+.env.local
+*.key
+
+# Python
+__pycache__/
+*.py[cod]
+*$py.class
+*.egg-info/
+.eggs/
+build/
+dist/
+.venv/
+venv/
+.pytest_cache/
+.mypy_cache/
+.ruff_cache/
+htmlcov/
+.coverage
+.coverage.*
+
+# 运行时
+*.log
+hooks.log
+
+# 编辑器
+.vscode/
+.idea/
+*.swp
+*.swo
+
+# OS
+Thumbs.db
+.DS_Store
+
+# 本项目专属：本地索引产物（不该进源码仓）
+*.sqlite
+*.sqlite-journal

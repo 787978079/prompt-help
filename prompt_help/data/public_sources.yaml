@@ -1,0 +1,39 @@
+# 公开提示词库源（Phase 7）。
+# 每个 source 含：id / name / url / format / language / default_categories
+# format 类型：
+#   markdown_headings — 按 ## 拆，每段是一条
+#   csv — 第一行表头，含 act / prompt 列（如 awesome-chatgpt-prompts/prompts.csv）
+#   jupyter_notebook — .ipynb JSON，从 markdown cells 抽取后再走 headings
+
+source:
+  - id: awesome-chatgpt-prompts
+    name: Awesome ChatGPT Prompts
+    url: https://raw.githubusercontent.com/f/awesome-chatgpt-prompts/main/prompts.csv
+    format: csv
+    language: en
+    default_categories: [通用工程, AI/ML]
+    description: f/awesome-chatgpt-prompts 200+ 角色扮演式提示词，多 LLM 通用
+
+  - id: awesome-chatgpt-prompts-zh
+    name: Awesome ChatGPT Prompts 中文版
+    url: https://raw.githubusercontent.com/PlexPt/awesome-chatgpt-prompts-zh/main/README.md
+    format: markdown_headings
+    language: zh
+    default_categories: [通用工程, AI/ML]
+    description: PlexPt 维护的中文版 ChatGPT 提示词集合（README 内 ### 标题分段）
+
+  - id: awesome-claude-prompts
+    name: Awesome Claude Prompts
+    url: https://raw.githubusercontent.com/yzfly/Awesome-Claude-Prompts/main/README.md
+    format: markdown_headings
+    language: en
+    default_categories: [通用工程, AI/ML]
+    description: yzfly 维护的 Claude 提示词集合
+
+  - id: awesome-cursorrules
+    name: Awesome Cursor Rules
+    url: https://raw.githubusercontent.com/PatrickJS/awesome-cursorrules/main/README.md
+    format: markdown_headings
+    language: en
+    default_categories: [前端, 后端]
+    description: Cursor IDE 的 .cursorrules 模板汇总

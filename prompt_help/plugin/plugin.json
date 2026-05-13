@@ -1,0 +1,42 @@
+{
+  "name": "prompt-help",
+  "version": "0.1.0",
+  "description": "跨项目提示词管理 · 对话挖掘 · 产品发现工具",
+  "author": "linguofeng",
+  "license": "MIT",
+  "commands_dir": "commands",
+  "hooks": {
+    "Stop": [
+      {
+        "type": "command",
+        "command": "python",
+        "args": ["${CLAUDE_PLUGIN_ROOT}/hooks/stop.py"],
+        "timeout_ms": 5000
+      }
+    ],
+    "SessionStart": [
+      {
+        "type": "command",
+        "command": "python",
+        "args": ["${CLAUDE_PLUGIN_ROOT}/hooks/session_start.py"],
+        "timeout_ms": 3000
+      }
+    ],
+    "UserPromptSubmit": [
+      {
+        "type": "command",
+        "command": "python",
+        "args": ["${CLAUDE_PLUGIN_ROOT}/hooks/user_prompt_submit.py"],
+        "timeout_ms": 2000
+      }
+    ],
+    "PreCompact": [
+      {
+        "type": "command",
+        "command": "python",
+        "args": ["${CLAUDE_PLUGIN_ROOT}/hooks/pre_compact.py"],
+        "timeout_ms": 8000
+      }
+    ]
+  }
+}
