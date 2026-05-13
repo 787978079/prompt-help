@@ -148,11 +148,35 @@ def find_cmd(
     is_template: Optional[bool] = typer.Option(None, "--is-template/--no-template",
                                                 help="只看通用模板 / 只看原始材料"),
     lang: Optional[str] = typer.Option(None, "--lang", help="zh/en 过滤（取 tags 中的 语言-X）"),
+    action_tag: Optional[str] = typer.Option(
+        None, "--action-tag",
+        help="按动作类型四字标签筛（设计优化 / 环境检查 / ... 14 之一）",
+    ),
 ):
     """跨项目检索提示词（含 --inline 模式给 slash command 用）。"""
     cfg = _config()
     conn = indexer.open_db(cfg)
-    if query.strip():
+
+    if action_tag:
+        # indexer 当前签名不支持 action_tag 参数。先 SQL 直接拿全集再让 score 排序处理
+        # 顺序：WHERE action_tag=? + 现有 scope/project/is_template 过滤 → 评分排序
+        sql = "SELECT * FROM prompts WHERE action_tag = ?"
+        params: list = [action_tag]
+        if scope:
+            sql += " AND scope = ?"; params.append(scope)
+        if project:
+            sql += " AND project = ?"; params.append(project)
+        if is_template is not None:
+            sql += " AND is_template = ?"; params.append(1 if is_template else 0)
+        sql += " ORDER BY used*2 + success_signal*3 DESC, created DESC LIMIT ?"
+        params.append(top_k)
+        rows = list(conn.execute(sql, params))
+        if query.strip():
+            # 简单 body 包含过滤（不走 FTS5；action_tag 优先）
+            q_low = query.lower()
+            rows = [r for r in rows if q_low in (r["title"] or "").lower() or q_low in (r["body"] or "").lower()]
+        results = [(r, 0.0) for r in rows]
+    elif query.strip():
         results = indexer.search(
             conn, query, scope=scope, project=project,
             is_template=is_template, top_k=top_k,

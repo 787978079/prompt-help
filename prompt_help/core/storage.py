@@ -47,6 +47,7 @@ class Prompt:
     is_template: bool = False  # Phase 8：True = 已通用化的可分享模板版
     description: str = ""       # Phase 9：用户写或 LLM 生成的一句话描述
     source_ref: str = ""        # Phase 9：参考来源（项目名 / 网页 URL / 文件路径）
+    action_tag: str = ""        # Phase 22.5：动作类型四字标签（14 类之一或空）
 
     @classmethod
     def new(
@@ -60,8 +61,6 @@ class Prompt:
         origin: Origin = "manual",
         triggers: list[str] | None = None,
         *,
-        # 之前这些字段必须 new() 完再手动赋值，结果调用方常漏。
-        # 改成 kwargs 一次给齐，确保"参考来源"等元数据真的落盘。
         source_ref: str = "",
         source_url: str | None = None,
         description: str = "",
@@ -69,6 +68,7 @@ class Prompt:
         is_template: bool = False,
         categories: list[str] | None = None,
         projects: list[str] | None = None,
+        action_tag: str = "",
     ) -> Prompt:
         return cls(
             id=str(ULID()),
@@ -87,6 +87,7 @@ class Prompt:
             optimized_from=optimized_from,
             is_template=is_template,
             categories=categories or [],
+            action_tag=action_tag,
         )
 
 
@@ -132,6 +133,7 @@ def serialize(p: Prompt) -> str:
         "is_template": p.is_template if p.is_template else None,
         "description": p.description or None,
         "source_ref": p.source_ref or None,
+        "action_tag": p.action_tag or None,
     }
     # 移除 None 值
     fm = {k: v for k, v in fm.items() if v is not None}
@@ -169,6 +171,7 @@ def parse(text: str) -> Prompt:
         is_template=bool(fm.get("is_template", False)),
         description=str(fm.get("description") or ""),
         source_ref=str(fm.get("source_ref") or ""),
+        action_tag=str(fm.get("action_tag") or ""),
     )
 
 

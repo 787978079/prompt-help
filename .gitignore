@@ -37,3 +37,10 @@ Thumbs.db
 # 本项目专属：本地索引产物（不该进源码仓）
 *.sqlite
 *.sqlite-journal
+
+# 开发期截图（含 Windows 用户名 / 本机路径，开源时不发布）
+screenshots/
+
+# 本地 Claude Code workspace（plugin / commands 缓存）
+.claude/projects/
+.claude/cache/

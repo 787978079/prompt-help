@@ -91,6 +91,28 @@ class PromptEditorDialog(QDialog):
         self.stack.setPlaceholderText("适用技术栈，逗号分隔，如 nextjs,react")
         form.addRow("stack", self.stack)
 
+        # Phase 22.5：动作类型四字标签（14 之一 + 空=未标）
+        from ...core.action_tags import ALL_TAGS
+        action_row = QHBoxLayout()
+        action_row.setSpacing(6)
+        self.action_tag = QComboBox()
+        self.action_tag.addItem("（未标）", "")
+        for tag in ALL_TAGS:
+            self.action_tag.addItem(tag, tag)
+        self.action_tag.setToolTip("把这条 prompt 归到一个动作类型；不确定让 LLM 推荐")
+        action_row.addWidget(self.action_tag, 1)
+
+        self.btn_suggest_action = QPushButton(" LLM 推荐")
+        self.btn_suggest_action.setProperty("class", "subtle")
+        self.btn_suggest_action.setIcon(_icons.icon("generalize"))
+        self.btn_suggest_action.setIconSize(_QSize(13, 13))
+        self.btn_suggest_action.setToolTip("基于正文让 LLM 推荐一个动作类型；规则命中优先")
+        self.btn_suggest_action.clicked.connect(self._on_suggest_action_tag)
+        action_row.addWidget(self.btn_suggest_action)
+
+        action_host = QWidget(); action_host.setLayout(action_row)
+        form.addRow("场景标签", action_host)
+
         self.body = QPlainTextEdit()
         self.body.setPlaceholderText("提示词正文。Markdown 格式。")
         self.body.setMinimumHeight(280)
@@ -137,8 +159,36 @@ class PromptEditorDialog(QDialog):
         self.triggers.setText(", ".join(p.triggers))
         self.tags.setText(", ".join(p.tags))
         self.stack.setText(", ".join(p.stack))
+        # action_tag 下拉恢复
+        ai = self.action_tag.findData(p.action_tag or "")
+        if ai >= 0:
+            self.action_tag.setCurrentIndex(ai)
         self.body.setPlainText(p.body)
         self._on_scope_change()
+
+    def _on_suggest_action_tag(self) -> None:
+        """LLM / 规则推荐一个动作类型，填入下拉。"""
+        body = self.body.toPlainText().strip()
+        title = self.title.text().strip()
+        if not body:
+            QMessageBox.information(self, "缺正文", "先填正文才能推荐场景标签。")
+            return
+        from ...core import action_tags as _at
+        full = title + "\n\n" + body
+        # 规则优先（快）
+        hit = _at.rule_classify(full)
+        if not hit:
+            from PySide6.QtCore import Qt as _Qt
+            from PySide6.QtGui import QCursor
+            from PySide6.QtWidgets import QApplication
+            QApplication.setOverrideCursor(QCursor(_Qt.CursorShape.WaitCursor))
+            try:
+                hit = _at.llm_classify(self.cfg, full)
+            finally:
+                QApplication.restoreOverrideCursor()
+        ai = self.action_tag.findData(hit or "")
+        if ai >= 0:
+            self.action_tag.setCurrentIndex(ai)
 
     def _on_gen_description(self) -> None:
         """LLM 基于正文生成一句话描述。"""
@@ -194,6 +244,8 @@ class PromptEditorDialog(QDialog):
         desc = self.description.text().strip()
         ref = self.source_ref.text().strip()
 
+        action_tag_val = self.action_tag.currentData() or ""
+
         # 装配 Prompt
         if self.prompt:
             p = self.prompt
@@ -206,6 +258,7 @@ class PromptEditorDialog(QDialog):
             p.triggers = _split_csv(self.triggers.text())
             p.description = desc
             p.source_ref = ref
+            p.action_tag = action_tag_val
         else:
             p = storage.Prompt.new(
                 title=title, body=body, scope=scope,
@@ -214,6 +267,7 @@ class PromptEditorDialog(QDialog):
                 stack=_split_csv(self.stack.text()),
                 triggers=_split_csv(self.triggers.text()),
                 origin="manual",
+                action_tag=action_tag_val,
             )
             p.description = desc
             p.source_ref = ref

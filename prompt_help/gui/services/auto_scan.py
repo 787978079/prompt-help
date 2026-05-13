@@ -120,6 +120,9 @@ class AutoScanWorker(QThread):
                 from ...core import scoring as _scoring
                 confidence = _scoring.compute_confidence(self.cfg, body)
                 try:
+                    # 入 inbox 时也打 action_tag（规则识别，不调 LLM 避免拖慢扫描）
+                    from ...core import action_tags as _at
+                    action_tag = _at.rule_classify(body) or ""
                     out.write_text(
                         f"---\n"
                         f"confidence: {confidence}\n"
@@ -128,6 +131,7 @@ class AutoScanWorker(QThread):
                         f"origin: auto_scan\n"
                         f"source: {adapter.name}\n"
                         f"source_project: {raw.source_project}\n"
+                        f"action_tag: {action_tag}\n"
                         f"---\n\n{body}\n",
                         encoding="utf-8",
                     )

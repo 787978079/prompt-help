@@ -211,6 +211,9 @@ class LibraryPage(QWidget):
         self.tab_filters.append(("inbox", self.inbox_view))
         self._dirty["inbox"] = True
 
+        # Phase 22.5 N2：QSettings 持久化 — 恢复上次的 tab / 排序 / 搜索关键词
+        self._restore_persistent_state()
+
     # ------------------------------------------------------------------
 
     _last_show_ts: float = 0.0
@@ -285,6 +288,7 @@ class LibraryPage(QWidget):
                 view.set_sort(sort_by)
                 self._dirty[key] = True
         self._refresh_current_tab()
+        self._save_persistent_state()
 
     def _on_share_selected(self) -> None:
         """P12-N1 + P14：批量分享选中的 prompts。支持全量 / 增量两种模式。"""
@@ -370,6 +374,8 @@ class LibraryPage(QWidget):
                 self._dirty[key] = True
         self._refresh_current_tab()
         self._refresh_tab_titles()
+        # 持久化搜索文本（debounce 后再写，避免每字符都触 QSettings 落盘）
+        self._save_persistent_state()
 
     def _on_tab_changed(self, _i: int) -> None:
         idx = self.tabs.currentIndex()
@@ -379,6 +385,47 @@ class LibraryPage(QWidget):
             if self._dirty.get(key, True):
                 view.refresh()
                 self._dirty[key] = False
+        self._save_persistent_state()
+
+    # ------------------------------------------------------------------
+    # Phase 22.5 N2：状态持久化（QSettings）
+    # ------------------------------------------------------------------
+
+    _SETTINGS_GROUP = "library"
+
+    def _settings(self):
+        from PySide6.QtCore import QSettings
+        return QSettings("PromptHelp", "PH")
+
+    def _save_persistent_state(self) -> None:
+        s = self._settings()
+        s.beginGroup(self._SETTINGS_GROUP)
+        try:
+            s.setValue("tab_index", self.tabs.currentIndex())
+            s.setValue("sort_by", self.sort_combo.currentData() or "score")
+            s.setValue("search", self.search.text())
+        finally:
+            s.endGroup()
+
+    def _restore_persistent_state(self) -> None:
+        s = self._settings()
+        s.beginGroup(self._SETTINGS_GROUP)
+        try:
+            tab_idx = s.value("tab_index", 0, type=int)
+            sort_by = s.value("sort_by", "score", type=str)
+            search = s.value("search", "", type=str)
+        finally:
+            s.endGroup()
+        # 恢复排序（触发 _on_sort_changed → 再 save，但 save 后值不变）
+        sort_idx = self.sort_combo.findData(sort_by)
+        if sort_idx >= 0:
+            self.sort_combo.setCurrentIndex(sort_idx)
+        # 恢复搜索关键词（只填字段，让 textChanged → _do_search 自然触发）
+        if search:
+            self.search.setText(search)
+        # 恢复 tab 放最后（其他状态先就位再切，避免切完又被覆盖）
+        if 0 <= tab_idx < self.tabs.count():
+            self.tabs.setCurrentIndex(tab_idx)
 
     def _on_new(self) -> None:
         from ..widgets.prompt_editor import PromptEditorDialog
@@ -708,20 +755,22 @@ class PromptListView(QWidget):
         v.addWidget(split, 1)
 
         # Phase 9：5 列——名称 / 描述 / 类型 / 参考来源 / 用过
-        self.table = QTableWidget(0, 5)
-        self.table.setHorizontalHeaderLabels(["名称", "描述", "类型", "参考来源", "用过"])
+        # Phase 22.5：名称 / 场景 / 描述 / 类型 / 参考来源 / 用过（6 列）
+        self.table = QTableWidget(0, 6)
+        self.table.setHorizontalHeaderLabels(["名称", "场景", "描述", "类型", "参考来源", "用过"])
         self.table.verticalHeader().setVisible(False)
         self.table.setSelectionBehavior(self.table.SelectionBehavior.SelectRows)
         # P12-N1：允许 Ctrl/Shift 多选，分享按钮可批量导出
         self.table.setSelectionMode(self.table.SelectionMode.ExtendedSelection)
         self.table.setEditTriggers(self.table.EditTrigger.NoEditTriggers)
-        # 描述列拉伸；其他按内容
+        # 6 列尺寸策略
         hh = self.table.horizontalHeader()
         hh.setSectionResizeMode(0, QHeaderView.ResizeMode.ResizeToContents)  # 名称
-        hh.setSectionResizeMode(1, QHeaderView.ResizeMode.Stretch)            # 描述
-        hh.setSectionResizeMode(2, QHeaderView.ResizeMode.ResizeToContents)
-        hh.setSectionResizeMode(3, QHeaderView.ResizeMode.ResizeToContents)
-        hh.setSectionResizeMode(4, QHeaderView.ResizeMode.ResizeToContents)
+        hh.setSectionResizeMode(1, QHeaderView.ResizeMode.ResizeToContents)  # 场景（4 字）
+        hh.setSectionResizeMode(2, QHeaderView.ResizeMode.Stretch)            # 描述
+        hh.setSectionResizeMode(3, QHeaderView.ResizeMode.ResizeToContents)  # 类型
+        hh.setSectionResizeMode(4, QHeaderView.ResizeMode.ResizeToContents)  # 参考来源
+        hh.setSectionResizeMode(5, QHeaderView.ResizeMode.ResizeToContents)  # 用过
         self.table.itemSelectionChanged.connect(self._on_select_row)
         self.table.itemDoubleClicked.connect(lambda _: self._on_edit())
         # P12-N4：右键菜单
@@ -856,11 +905,16 @@ class PromptListView(QWidget):
                 parts = ref_full.replace("\\", "/").split("/")
                 tail = "/".join(parts[-2:]) if len(parts) > 2 else ref_full
                 ref_display = "…/" + tail if tail else ref_full
+            try:
+                action_tag = row["action_tag"] or "—"
+            except (KeyError, IndexError):
+                action_tag = "—"
             self._set_item(i, 0, name, row["id"])
-            self._set_item(i, 1, desc)
-            self._set_item(i, 2, _SCOPE_LABEL.get(row["scope"], row["scope"]))
-            self._set_item(i, 3, ref_display, tooltip=ref_full)
-            self._set_item(i, 4, str(row["used"]))
+            self._set_item(i, 1, action_tag)
+            self._set_item(i, 2, desc)
+            self._set_item(i, 3, _SCOPE_LABEL.get(row["scope"], row["scope"]))
+            self._set_item(i, 4, ref_display, tooltip=ref_full)
+            self._set_item(i, 5, str(row["used"]))
 
         if self.table.rowCount() > 0:
             self.table.selectRow(0)
@@ -1204,6 +1258,7 @@ class InboxView(QWidget):
         super().__init__()
         self.cfg = cfg
         self.parent_page = parent_page
+        self._tag_filter: str = ""  # ""=全部
         self._build()
 
     def _build(self) -> None:
@@ -1220,6 +1275,38 @@ class InboxView(QWidget):
         explainer.setStyleSheet("color: #525252; font-size: 13px; padding: 0 4px 8px 4px;")
         v.addWidget(explainer)
 
+        # Phase 22.5 N4：场景标签 chips 单选过滤
+        from ...core.action_tags import ALL_TAGS
+        from PySide6.QtWidgets import QPushButton as _QBtn
+        chips_row = QHBoxLayout()
+        chips_row.setSpacing(4)
+        lbl = QLabel("场景：")
+        lbl.setStyleSheet("color: #525252; font-size: 12px; padding-right: 4px;")
+        chips_row.addWidget(lbl)
+        self._chip_buttons: dict[str, _QBtn] = {}
+        chip_qss = (
+            "QPushButton { background: #f0f0f0; border: 0; border-radius: 11px;"
+            "padding: 3px 10px; font-size: 11px; color: #525252; }"
+            "QPushButton:checked { background: #0a0a0a; color: white; font-weight: 600; }"
+            "QPushButton:hover:!checked { background: #e0e0e0; }"
+        )
+        all_btn = _QBtn("全部")
+        all_btn.setCheckable(True); all_btn.setChecked(True)
+        all_btn.setStyleSheet(chip_qss)
+        all_btn.clicked.connect(lambda: self._on_chip_clicked(""))
+        self._chip_buttons[""] = all_btn
+        chips_row.addWidget(all_btn)
+        for tag in ALL_TAGS:
+            b = _QBtn(tag)
+            b.setCheckable(True)
+            b.setStyleSheet(chip_qss)
+            b.clicked.connect(lambda _c=False, t=tag: self._on_chip_clicked(t))
+            self._chip_buttons[tag] = b
+            chips_row.addWidget(b)
+        chips_row.addStretch(1)
+        chips_host = QWidget(); chips_host.setLayout(chips_row)
+        v.addWidget(chips_host)
+
         self.scroll = QScrollArea()
         self.scroll.setWidgetResizable(True)
         self.cards_host = QWidget()
@@ -1229,6 +1316,15 @@ class InboxView(QWidget):
         self.scroll.setWidget(self.cards_host)
         v.addWidget(self.scroll, 1)
 
+    def _on_chip_clicked(self, tag: str) -> None:
+        if tag == self._tag_filter:
+            self._chip_buttons[tag].setChecked(True)
+            return
+        self._tag_filter = tag
+        for k, b in self._chip_buttons.items():
+            b.setChecked(k == tag)
+        self.refresh()
+
     def refresh(self) -> None:
         # 清空
         while self.cards_layout.count():
@@ -1236,14 +1332,31 @@ class InboxView(QWidget):
             if w:
                 w.deleteLater()
 
-        items: list[InboxItem] = []
+        all_items: list[InboxItem] = []
         if self.cfg.inbox_dir.is_dir():
             for p in sorted(self.cfg.inbox_dir.glob("*.md")):
                 try:
-                    items.append(InboxItem.load(p))
+                    all_items.append(InboxItem.load(p))
                 except Exception:
                     continue
-            items.sort(key=lambda x: (-x.confidence, x.created))
+        # 各 chip 的命中数 → 写到按钮文字
+        counts: dict[str, int] = {"": len(all_items)}
+        for it in all_items:
+            tag = it.action_tag or ""
+            counts[tag] = counts.get(tag, 0) + 1
+        for k, b in self._chip_buttons.items():
+            if k == "":
+                b.setText(f"全部 ({counts.get('', 0)})")
+            else:
+                n = counts.get(k, 0)
+                b.setText(f"{k} ({n})" if n > 0 else k)
+
+        # 应用筛选
+        items = (
+            [it for it in all_items if (it.action_tag or "") == self._tag_filter]
+            if self._tag_filter else all_items
+        )
+        items.sort(key=lambda x: (-x.confidence, x.created))
 
         if not items:
             empty = QLabel(
@@ -1297,6 +1410,14 @@ class InboxCard(QFrame):
         badge = QLabel(f"匹配度 {int(conf * 100)}%")
         badge.setStyleSheet(f"color: {color}; font-weight: 600; font-size: 12px;")
         head.addWidget(badge)
+        # Phase 22.5 N4：显示动作类型标签
+        if self.item.action_tag:
+            tag_badge = QLabel(f"  · {self.item.action_tag}")
+            tag_badge.setStyleSheet(
+                "color: white; background: #525252; padding: 2px 8px;"
+                "border-radius: 9px; font-size: 11px; margin-left: 4px;"
+            )
+            head.addWidget(tag_badge)
         head.addStretch(1)
 
         self.btn_approve = QPushButton("保存")

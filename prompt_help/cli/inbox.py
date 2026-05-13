@@ -57,6 +57,7 @@ class InboxItem:
     created: str
     origin: str
     body: str
+    action_tag: str = ""
 
     @classmethod
     def load(cls, path: Path) -> "InboxItem":
@@ -75,6 +76,7 @@ class InboxItem:
             created=str(fm.get("created") or ""),
             origin=str(fm.get("origin") or "stop"),
             body=body,
+            action_tag=str(fm.get("action_tag") or "").strip(),
         )
 
 

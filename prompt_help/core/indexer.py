@@ -140,6 +140,14 @@ def _migrate_schema(conn: sqlite3.Connection) -> None:
             conn.commit()
         except Exception:
             pass
+    # Phase 22.5：action_tag 列（14 个固定四字标签之一或空）
+    if "action_tag" not in cols:
+        try:
+            conn.execute("ALTER TABLE prompts ADD COLUMN action_tag TEXT NOT NULL DEFAULT ''")
+            conn.execute("CREATE INDEX IF NOT EXISTS idx_action_tag ON prompts(action_tag)")
+            conn.commit()
+        except Exception:
+            pass
 
 
 def upsert(conn: sqlite3.Connection, p: Prompt, file_path: Path) -> None:
@@ -152,8 +160,9 @@ def upsert(conn: sqlite3.Connection, p: Prompt, file_path: Path) -> None:
         INSERT INTO prompts (id, title, scope, project, tags_csv, projects_csv, stack_csv,
                              triggers_csv, categories_csv, origin, used, success_signal,
                              last_used, created, file_path, body, is_template,
-                             description, source_ref, references_csv, optimized_from_id)
-        VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+                             description, source_ref, references_csv, optimized_from_id,
+                             action_tag)
+        VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
         ON CONFLICT(id) DO UPDATE SET
             title=excluded.title,
             scope=excluded.scope,
@@ -173,7 +182,8 @@ def upsert(conn: sqlite3.Connection, p: Prompt, file_path: Path) -> None:
             description=excluded.description,
             source_ref=excluded.source_ref,
             references_csv=excluded.references_csv,
-            optimized_from_id=excluded.optimized_from_id
+            optimized_from_id=excluded.optimized_from_id,
+            action_tag=excluded.action_tag
         """,
         (
             p.id, p.title, p.scope, p.project,
@@ -184,6 +194,7 @@ def upsert(conn: sqlite3.Connection, p: Prompt, file_path: Path) -> None:
             1 if p.is_template else 0,
             p.description, p.source_ref,
             refs_csv, p.optimized_from or "",
+            p.action_tag or "",
         ),
     )
     conn.commit()
