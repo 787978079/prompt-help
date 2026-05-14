@@ -4,8 +4,8 @@
 
 VSVersionInfo(
   ffi=FixedFileInfo(
-    filevers=(1, 0, 0, 0),
-    prodvers=(1, 0, 0, 0),
+    filevers=(0, 2, 0, 0),
+    prodvers=(0, 2, 0, 0),
     mask=0x3f,
     flags=0x0,
     OS=0x40004,
@@ -21,12 +21,12 @@ VSVersionInfo(
           [
             StringStruct(u'CompanyName', u'linguofeng'),
             StringStruct(u'FileDescription', u'Prompt Help - 跨项目提示词管家'),
-            StringStruct(u'FileVersion', u'1.0.0.0'),
+            StringStruct(u'FileVersion', u'0.2.0.0'),
             StringStruct(u'InternalName', u'PromptHelp'),
             StringStruct(u'LegalCopyright', u'© 2026 linguofeng · MIT License'),
             StringStruct(u'OriginalFilename', u'PromptHelp.exe'),
             StringStruct(u'ProductName', u'Prompt Help'),
-            StringStruct(u'ProductVersion', u'1.0.0.0'),
+            StringStruct(u'ProductVersion', u'0.2.0.0'),
             StringStruct(u'Comments', u'跨项目沉淀提示词 · 系统记忆 · 项目踩坑点'),
           ]
         )

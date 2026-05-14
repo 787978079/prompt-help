@@ -14,7 +14,7 @@
 ;   - 可选注册 .phzip 文件关联（双击打开 PH 自动导入）
 
 #define MyAppName "Prompt Help"
-#define MyAppVersion "1.0.0"
+#define MyAppVersion "0.2.0"
 #define MyAppPublisher "linguofeng"
 #define MyAppExeName "PromptHelp.exe"
 

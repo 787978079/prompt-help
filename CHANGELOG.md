@@ -2,6 +2,40 @@
 
 所有重要变更按 Phase 时间线整理。格式参考 [Keep a Changelog](https://keepachangelog.com/)。
 
+## v0.2.0 (2026-05-14) - 场景标签 + 去重治本
+
+首个开源迭代，**135 单元测试全过**。重点是把库变得"用得久不脏"。
+
+### 新功能
+- **14 个动作类型场景标签**（设计优化 / 环境检查 / 代码审查 / 调试排错 / 测试覆盖 / 文档撰写 / 数据处理 / 重构改造 / 性能优化 / 安全检查 / 部署发布 / 产品发现 / 知识总结 / 其他通用）
+- LibraryPage / InboxView 顶部 chips 单选行，每个 chip 显示真实计数
+- 编辑器加场景标签下拉 + 「LLM 推荐」按钮
+- 表格新增「场景」列，一眼看到归属
+- CLI `prompt-help auto-tag [--apply] [--retag-other] [--llm/--no-llm]` 批量打标
+- CLI `prompt-help find --action-tag "数据处理"` 按场景检索
+- 入库自动打标（auto_scan 走规则识别，不调 LLM 避免慢）
+
+### 去重治本
+- **历史一刀切**：`prompt-help inbox-dedupe [--apply]` 一次性清掉 ≥90% 相似的重复
+- **入库防新增**：`auto_scan` + `stop hook` 写新候选前先查 inbox，命中近似就跳过
+- GUI 待审 tab 顶行加「自动去重」按钮
+- 算法：token jaccard ≥ 0.85 或 SequenceMatcher ≥ 0.90 任一命中即判重
+
+### 状态持久化
+- LibraryPage tab / 排序 / 搜索 / 场景标签写到 QSettings，下次启动恢复
+
+### 其他改进
+- `indexer.list_all` / `search` / `_list_all_trending` 全部接 `action_tag` 参数
+- `indexer.count_by_action_tag()` 给 chips 显示真实计数
+- `core/scoring.py` 抽 `is_duplicate_in_inbox()` 公共接口，stop hook 和 auto_scan 共用
+- 开源准备：LICENSE (MIT) / CONTRIBUTING.md / SECURITY.md / .github/workflows/ci.yml
+
+### 实测效果
+- inbox：**517 条 → 48 条**（删 465 条 90% 相似重复）
+- 127 条 prompt 全部打上场景标签：数据处理 29 / 设计优化 20 / 产品发现 18 / 重构改造 11 / 其他通用仅 3（角色扮演类）
+
+---
+
 ## v1.0.0 (2026-05-11) - 首个稳定版
 
 完整产品形态，分发就绪。**128 单元测试全过**，跨 19 个 Phase 持续打磨。

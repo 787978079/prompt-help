@@ -4,7 +4,7 @@ build-backend = "setuptools.build_meta"
 
 [project]
 name = "prompt-help"
-version = "0.1.0"
+version = "0.2.0"
 description = "跨项目提示词管理、对话挖掘、产品发现工具，深度集成 Claude Code"
 readme = "README.md"
 requires-python = ">=3.11"
