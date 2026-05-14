@@ -185,6 +185,38 @@ class LibraryPage(QWidget):
         sort_row.addWidget(self.sort_combo)
         v.addLayout(sort_row)
 
+        # Phase 22.5：动作类型 chips 行（14 个固定四字标签 + "全部"，单选，跨 tab 生效）
+        # 用户最早的反馈：希望在我的库里按场景类型快速筛
+        from ...core.action_tags import ALL_TAGS as _ALL_TAGS
+        chips_row = QHBoxLayout()
+        chips_row.setSpacing(4)
+        chip_lbl = QLabel("场景：")
+        chip_lbl.setStyleSheet("color: #525252; font-size: 12px; padding-right: 4px;")
+        chips_row.addWidget(chip_lbl)
+        self._action_chip_buttons: dict[str, QPushButton] = {}
+        self._current_action_tag = ""
+        _chip_qss = (
+            "QPushButton { background: #f0f0f0; border: 0; border-radius: 11px;"
+            "padding: 3px 10px; font-size: 11px; color: #525252; }"
+            "QPushButton:checked { background: #0a0a0a; color: white; font-weight: 600; }"
+            "QPushButton:hover:!checked { background: #e0e0e0; }"
+        )
+        all_btn = QPushButton("全部")
+        all_btn.setCheckable(True); all_btn.setChecked(True)
+        all_btn.setStyleSheet(_chip_qss)
+        all_btn.clicked.connect(lambda: self._on_action_chip_clicked(""))
+        self._action_chip_buttons[""] = all_btn
+        chips_row.addWidget(all_btn)
+        for _tag in _ALL_TAGS:
+            _b = QPushButton(_tag)
+            _b.setCheckable(True)
+            _b.setStyleSheet(_chip_qss)
+            _b.clicked.connect(lambda _c=False, t=_tag: self._on_action_chip_clicked(t))
+            self._action_chip_buttons[_tag] = _b
+            chips_row.addWidget(_b)
+        chips_row.addStretch(1)
+        v.addLayout(chips_row)
+
         # tabs
         self.tabs = QTabWidget()
         self.tabs.currentChanged.connect(self._on_tab_changed)
@@ -211,7 +243,10 @@ class LibraryPage(QWidget):
         self.tab_filters.append(("inbox", self.inbox_view))
         self._dirty["inbox"] = True
 
-        # Phase 22.5 N2：QSettings 持久化 — 恢复上次的 tab / 排序 / 搜索关键词
+        # 给 chips 注入实际计数（命中 0 的标签淡化但仍可点）
+        self._refresh_action_chip_counts()
+
+        # Phase 22.5 N2：QSettings 持久化 — 恢复上次的 tab / 排序 / 搜索关键词 / 场景标签
         self._restore_persistent_state()
 
     # ------------------------------------------------------------------
@@ -388,7 +423,7 @@ class LibraryPage(QWidget):
         self._save_persistent_state()
 
     # ------------------------------------------------------------------
-    # Phase 22.5 N2：状态持久化（QSettings）
+    # Phase 22.5 N2：状态持久化（QSettings） + 场景 chips 行为
     # ------------------------------------------------------------------
 
     _SETTINGS_GROUP = "library"
@@ -397,6 +432,50 @@ class LibraryPage(QWidget):
         from PySide6.QtCore import QSettings
         return QSettings("PromptHelp", "PH")
 
+    def _on_action_chip_clicked(self, tag: str) -> None:
+        """场景 chip 单选切换，跨所有 tab 生效。"""
+        if tag == self._current_action_tag:
+            self._action_chip_buttons[tag].setChecked(True)
+            return
+        self._current_action_tag = tag
+        for k, b in self._action_chip_buttons.items():
+            b.setChecked(k == tag)
+        target = tag or None
+        for key, view in self.tab_filters:
+            if isinstance(view, PromptListView):
+                view.set_action_tag(target)
+                self._dirty[key] = True
+        self._refresh_current_tab()
+        self._save_persistent_state()
+
+    def _refresh_action_chip_counts(self) -> None:
+        """注入每个 chip 的实际命中数；为 0 的淡化样式。"""
+        from ...core.action_tags import ALL_TAGS as _ALL_TAGS
+        try:
+            conn = indexer.open_db(self.cfg)
+            counts = indexer.count_by_action_tag(conn)
+            conn.close()
+        except Exception:
+            counts = {}
+        total = sum(counts.values())
+        self._action_chip_buttons[""].setText(f"全部 ({total})")
+        # 0 条标签的样式淡化
+        _base_qss = (
+            "QPushButton { background: #f0f0f0; border: 0; border-radius: 11px;"
+            "padding: 3px 10px; font-size: 11px; color: #525252; }"
+            "QPushButton:checked { background: #0a0a0a; color: white; font-weight: 600; }"
+            "QPushButton:hover:!checked { background: #e0e0e0; }"
+        )
+        for tag in _ALL_TAGS:
+            n = counts.get(tag, 0)
+            btn = self._action_chip_buttons.get(tag)
+            if btn is None:
+                continue
+            btn.setText(f"{tag} ({n})" if n > 0 else tag)
+            btn.setStyleSheet(
+                _base_qss + ("QPushButton { color: #bbb; }" if n == 0 else "")
+            )
+
     def _save_persistent_state(self) -> None:
         s = self._settings()
         s.beginGroup(self._SETTINGS_GROUP)
@@ -404,6 +483,7 @@ class LibraryPage(QWidget):
             s.setValue("tab_index", self.tabs.currentIndex())
             s.setValue("sort_by", self.sort_combo.currentData() or "score")
             s.setValue("search", self.search.text())
+            s.setValue("action_tag", self._current_action_tag)
         finally:
             s.endGroup()
 
@@ -414,15 +494,17 @@ class LibraryPage(QWidget):
             tab_idx = s.value("tab_index", 0, type=int)
             sort_by = s.value("sort_by", "score", type=str)
             search = s.value("search", "", type=str)
+            action_tag = s.value("action_tag", "", type=str)
         finally:
             s.endGroup()
-        # 恢复排序（触发 _on_sort_changed → 再 save，但 save 后值不变）
         sort_idx = self.sort_combo.findData(sort_by)
         if sort_idx >= 0:
             self.sort_combo.setCurrentIndex(sort_idx)
-        # 恢复搜索关键词（只填字段，让 textChanged → _do_search 自然触发）
         if search:
             self.search.setText(search)
+        # 恢复场景 chip 选择
+        if action_tag and action_tag in self._action_chip_buttons:
+            self._on_action_chip_clicked(action_tag)
         # 恢复 tab 放最后（其他状态先就位再切，避免切完又被覆盖）
         if 0 <= tab_idx < self.tabs.count():
             self.tabs.setCurrentIndex(tab_idx)
@@ -735,6 +817,7 @@ class PromptListView(QWidget):
         self._query: str = ""
         self._categories: list[str] = []
         self._sort_by: str = "score"
+        self._action_tag: str | None = None
         self._build()
 
     def set_query(self, q: str) -> None:
@@ -745,6 +828,10 @@ class PromptListView(QWidget):
 
     def set_sort(self, sort_by: str) -> None:
         self._sort_by = sort_by
+
+    def set_action_tag(self, tag: str | None) -> None:
+        """LibraryPage 顶部 chips 切换时调用。""=全部；否则 14 标签之一。"""
+        self._action_tag = tag or None
 
     def _build(self) -> None:
         v = QVBoxLayout(self)
@@ -843,6 +930,7 @@ class PromptListView(QWidget):
             results = indexer.search(
                 conn, self._query, scope=self.scope_filter,
                 categories=cats, is_template=self.is_template_filter,
+                action_tag=self._action_tag,
                 top_k=300,
             )
             rows = [r for r, _s in results]
@@ -850,6 +938,7 @@ class PromptListView(QWidget):
             rows = indexer.list_all(
                 conn, scope=self.scope_filter, categories=cats, limit=500,
                 sort_by=self._sort_by, is_template=self.is_template_filter,
+                action_tag=self._action_tag,
             )
         conn.close()
 

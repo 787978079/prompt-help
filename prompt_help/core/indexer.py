@@ -270,13 +270,16 @@ _SORT_CLAUSES = {
 
 def list_all(conn: sqlite3.Connection, scope: str | None = None, project: str | None = None,
              categories: list[str] | None = None, limit: int = 200,
-             sort_by: str = "score", is_template: bool | None = None) -> list[sqlite3.Row]:
+             sort_by: str = "score", is_template: bool | None = None,
+             *, action_tag: str | None = None) -> list[sqlite3.Row]:
     """sort_by: score | used | success | last_used | created | trending
 
     is_template：None=不过滤；True=只看通用模板；False=只看原始材料（Phase 8）。
+    action_tag：14 个动作类型标签之一；None=不过滤。
     """
     if sort_by == "trending":
-        return _list_all_trending(conn, scope, project, categories, limit, is_template)
+        return _list_all_trending(conn, scope, project, categories, limit, is_template,
+                                  action_tag=action_tag)
 
     sql = "SELECT * FROM prompts WHERE 1=1"
     params: list = []
@@ -295,13 +298,17 @@ def list_all(conn: sqlite3.Connection, scope: str | None = None, project: str | 
     if is_template is not None:
         sql += " AND is_template = ?"
         params.append(1 if is_template else 0)
+    if action_tag:
+        sql += " AND action_tag = ?"
+        params.append(action_tag)
     order = _SORT_CLAUSES.get(sort_by, _SORT_CLAUSES["score"])
     sql += f" ORDER BY {order} LIMIT ?"
     params.append(limit)
     return list(conn.execute(sql, params))
 
 
-def _list_all_trending(conn, scope, project, categories, limit, is_template=None):
+def _list_all_trending(conn, scope, project, categories, limit, is_template=None,
+                       *, action_tag=None):
     """trending：先查 trending 排序的 prompt_id 列表，再 join prompts。"""
     import time as _time
     cutoff = int(_time.time()) - 7 * 86400
@@ -313,7 +320,8 @@ def _list_all_trending(conn, scope, project, categories, limit, is_template=None
     trending_ids = [r["prompt_id"] for r in trending_rows]
     if not trending_ids:
         return list_all(conn, scope=scope, project=project, categories=categories,
-                        limit=limit, sort_by="last_used", is_template=is_template)
+                        limit=limit, sort_by="last_used", is_template=is_template,
+                        action_tag=action_tag)
     placeholders = ",".join("?" * len(trending_ids))
     sql = f"SELECT * FROM prompts WHERE id IN ({placeholders})"
     params: list = list(trending_ids)
@@ -332,6 +340,9 @@ def _list_all_trending(conn, scope, project, categories, limit, is_template=None
     if is_template is not None:
         sql += " AND is_template = ?"
         params.append(1 if is_template else 0)
+    if action_tag:
+        sql += " AND action_tag = ?"
+        params.append(action_tag)
     rows = list(conn.execute(sql, params))
     order_map = {pid: i for i, pid in enumerate(trending_ids)}
     rows.sort(key=lambda r: order_map.get(r["id"], 9999))
@@ -353,6 +364,20 @@ def count_all(conn: sqlite3.Connection) -> dict[str, int]:
     for r in conn.execute("SELECT scope, COUNT(*) AS c FROM prompts GROUP BY scope"):
         out[r["scope"]] = r["c"]
     out["total"] = sum(v for k, v in out.items() if k != "total")
+    return out
+
+
+def count_by_action_tag(conn: sqlite3.Connection, *, is_template: bool | None = None) -> dict[str, int]:
+    """聚合各 action_tag 的条目数（""=未标）。chips 用来显示每标签计数。"""
+    sql = "SELECT action_tag, COUNT(*) AS c FROM prompts"
+    params: list = []
+    if is_template is not None:
+        sql += " WHERE is_template = ?"
+        params.append(1 if is_template else 0)
+    sql += " GROUP BY action_tag"
+    out: dict[str, int] = {}
+    for r in conn.execute(sql, params):
+        out[r["action_tag"] or ""] = r["c"]
     return out
 
 
@@ -429,6 +454,7 @@ def search(
     categories: list[str] | None = None,
     is_template: bool | None = None,
     top_k: int = 10,
+    action_tag: str | None = None,
 ) -> list[tuple[sqlite3.Row, float]]:
     """FTS5 检索 + 评分排序。返回 (row, score) 列表。"""
     fts_q = _sanitize_query(query)
@@ -457,6 +483,9 @@ def search(
     if is_template is not None:
         sql += " AND p.is_template = ?"
         params.append(1 if is_template else 0)
+    if action_tag:
+        sql += " AND p.action_tag = ?"
+        params.append(action_tag)
     sql += f" ORDER BY bm25 ASC LIMIT {max(top_k * 5, 50)}"
 
     rows = list(conn.execute(sql, params))
