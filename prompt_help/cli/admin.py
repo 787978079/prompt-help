@@ -36,6 +36,7 @@ def register(app: typer.Typer) -> None:
     app.command(name="backfill-source-ref")(backfill_source_ref_cmd)
     app.command(name="regenerate-titles")(regenerate_titles_cmd)
     app.command(name="inbox-rescore")(inbox_rescore_cmd)
+    app.command(name="inbox-dedupe")(inbox_dedupe_cmd)
     app.command(name="why-matched")(why_matched_cmd)
     app.command(name="inbox-add")(inbox_add_cmd)
     app.command(name="match-project")(match_project_cmd)
@@ -1200,6 +1201,105 @@ def inbox_rescore_cmd(
         )
         written += 1
     console.print(f"[green]✓[/green] 已重算 {written} 条 inbox 候选 confidence")
+
+
+# ---------------------------------------------------------------------------
+# inbox-dedupe：相似度 ≥ 阈值的候选合并保 1 条（默认 90%）
+# ---------------------------------------------------------------------------
+
+def inbox_dedupe_cmd(
+    apply: bool = typer.Option(False, "--apply", help="真删（默认 dry-run）"),
+    threshold: float = typer.Option(
+        0.90, "--threshold",
+        help="SequenceMatcher 相似度阈值（0-1）。默认 0.90 = 90% 相似才合并",
+    ),
+    token_threshold: float = typer.Option(
+        0.85, "--token-threshold",
+        help="token 重合度阈值。SequenceMatcher 或 token 任一命中即判重",
+    ),
+):
+    """Inbox 候选自动去重：相似度 ≥ 阈值的合并保留 1 条。
+
+    保留策略（按优先级）：
+      1. confidence 更高
+      2. body 更长（信息更完整）
+      3. created 更早（先入库的胜出）
+    """
+    cfg = _config()
+    from ..core import quality as _quality
+    from ..cli.inbox import InboxItem
+
+    if not cfg.inbox_dir.is_dir():
+        console.print("[dim]没有 inbox 目录[/dim]")
+        return
+
+    items: list = []
+    for p in sorted(cfg.inbox_dir.glob("*.md")):
+        try:
+            items.append(InboxItem.load(p))
+        except Exception:
+            continue
+    if not items:
+        console.print("[dim]inbox 为空[/dim]")
+        return
+
+    console.print(f"扫 {len(items)} 条 inbox 候选，相似度阈值 {threshold:.0%}…")
+
+    def _score(it) -> tuple:
+        return (it.confidence, len(it.body), -ord(it.created[0]) if it.created else 0)
+
+    # 双向比较：找重复组。保留每组里 _score 最高的，其余标记为可删
+    survivors: list = []
+    to_delete: list[tuple] = []  # (item_dropped, kept_item, sim)
+    for cand in items:
+        merged = False
+        for i, kept in enumerate(survivors):
+            if _quality.is_duplicate(
+                cand.body, kept.body,
+                token_threshold=token_threshold,
+                seq_threshold=threshold,
+            ):
+                # 决定谁留谁丢
+                if _score(cand) > _score(kept):
+                    to_delete.append((kept, cand, threshold))
+                    survivors[i] = cand
+                else:
+                    to_delete.append((cand, kept, threshold))
+                merged = True
+                break
+        if not merged:
+            survivors.append(cand)
+
+    if not to_delete:
+        console.print("[green]✓[/green] 没有重复候选")
+        return
+
+    table = Table(title=f"{'即将删除' if apply else 'Dry-run 计划删除'} ({len(to_delete)} 条)")
+    table.add_column("丢", overflow="fold")
+    table.add_column("→ 留", overflow="fold")
+    table.add_column("conf 丢/留", justify="right")
+    for dropped, kept, _sim in to_delete[:30]:
+        table.add_row(
+            (dropped.suggested_title or dropped.body[:40])[:50],
+            (kept.suggested_title or kept.body[:40])[:50],
+            f"{dropped.confidence:.2f} / {kept.confidence:.2f}",
+        )
+    console.print(table)
+    if len(to_delete) > 30:
+        console.print(f"[dim]… 还有 {len(to_delete) - 30} 条未列[/dim]")
+
+    if not apply:
+        console.print(f"\n[dim]共 {len(to_delete)} 条会删。加 --apply 真的删[/dim]")
+        return
+
+    deleted = 0
+    for dropped, _kept, _sim in to_delete:
+        try:
+            dropped.path.unlink(missing_ok=True)
+            deleted += 1
+        except OSError as e:
+            console.print(f"  [yellow]warn[/yellow] {dropped.path.name}: {e}")
+    console.print(f"[green]✓[/green] 已删 {deleted} 条重复候选，剩 {len(items) - deleted} 条")
 
 
 # ---------------------------------------------------------------------------

@@ -1355,6 +1355,8 @@ class InboxView(QWidget):
         v.setContentsMargins(0, 12, 0, 0)
         v.setSpacing(8)
 
+        # 顶行：说明文字 + 自动去重按钮
+        top = QHBoxLayout()
         explainer = QLabel(
             "**这是什么**：装上 Claude Code 插件后，你写完一段好提示词、"
             "Claude 觉得「这条值得保存」时会自动放到这里等你确认。"
@@ -1362,7 +1364,21 @@ class InboxView(QWidget):
         explainer.setWordWrap(True)
         explainer.setTextFormat(Qt.TextFormat.MarkdownText)
         explainer.setStyleSheet("color: #525252; font-size: 13px; padding: 0 4px 8px 4px;")
-        v.addWidget(explainer)
+        top.addWidget(explainer, 1)
+
+        self.btn_dedupe = QPushButton(" 自动去重")
+        self.btn_dedupe.setProperty("class", "subtle")
+        from .. import icons as _icons2
+        from PySide6.QtCore import QSize as _QSize2
+        self.btn_dedupe.setIcon(_icons2.icon("scan_history"))
+        self.btn_dedupe.setIconSize(_QSize2(14, 14))
+        self.btn_dedupe.setToolTip(
+            "扫待审里的重复候选（≥90% 相似），保留 confidence 高 / 长度长的，删多余\n"
+            "（点击会二次确认）"
+        )
+        self.btn_dedupe.clicked.connect(self._on_dedupe)
+        top.addWidget(self.btn_dedupe)
+        v.addLayout(top)
 
         # Phase 22.5 N4：场景标签 chips 单选过滤
         from ...core.action_tags import ALL_TAGS
@@ -1413,6 +1429,76 @@ class InboxView(QWidget):
         for k, b in self._chip_buttons.items():
             b.setChecked(k == tag)
         self.refresh()
+
+    def _on_dedupe(self) -> None:
+        """扫 inbox 重复（≥90% 相似），保留 confidence 高 / 长度长的，删多余。"""
+        from ...core import quality as _quality
+        items: list = []
+        if self.cfg.inbox_dir.is_dir():
+            for p in sorted(self.cfg.inbox_dir.glob("*.md")):
+                try:
+                    items.append(InboxItem.load(p))
+                except Exception:
+                    continue
+        if not items:
+            QMessageBox.information(self, "去重", "inbox 为空，没什么可去重的。")
+            return
+
+        def _score(it) -> tuple:
+            return (it.confidence, len(it.body))
+
+        survivors: list = []
+        to_delete: list = []
+        for cand in items:
+            merged = False
+            for i, kept in enumerate(survivors):
+                if _quality.is_duplicate(
+                    cand.body, kept.body,
+                    token_threshold=0.85,
+                    seq_threshold=0.90,
+                ):
+                    if _score(cand) > _score(kept):
+                        to_delete.append(kept)
+                        survivors[i] = cand
+                    else:
+                        to_delete.append(cand)
+                    merged = True
+                    break
+            if not merged:
+                survivors.append(cand)
+
+        if not to_delete:
+            QMessageBox.information(self, "去重", "没找到重复（相似度 ≥ 90%）候选。")
+            return
+
+        ans = QMessageBox.warning(
+            self,
+            "确认去重",
+            f"扫到 {len(to_delete)} 条重复候选（≥90% 相似）。\n"
+            f"将自动保留 confidence 更高 / 内容更长的版本，删多余的。\n\n"
+            f"删后：{len(items)} 条 → {len(items) - len(to_delete)} 条。\n\n"
+            f"确定删除？",
+            QMessageBox.StandardButton.Yes | QMessageBox.StandardButton.Cancel,
+            QMessageBox.StandardButton.Cancel,
+        )
+        if ans != QMessageBox.StandardButton.Yes:
+            return
+
+        deleted = 0
+        for dropped in to_delete:
+            try:
+                dropped.path.unlink(missing_ok=True)
+                deleted += 1
+            except OSError:
+                pass
+        QMessageBox.information(
+            self, "已去重",
+            f"删了 {deleted} 条重复候选。剩 {len(items) - deleted} 条。",
+        )
+        self.refresh()
+        win = self.window()
+        if hasattr(win, "_refresh_status"):
+            win._refresh_status()
 
     def refresh(self) -> None:
         # 清空
