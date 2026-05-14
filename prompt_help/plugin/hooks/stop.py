@@ -113,13 +113,15 @@ def run(inp: dict, cfg) -> str | None:
     try:
         cfg.inbox_dir.mkdir(parents=True, exist_ok=True)
         import datetime as dt
-        ts = dt.datetime.now(dt.timezone.utc).strftime("%Y%m%dT%H%M%S")
-        out = cfg.inbox_dir / f"{ts}-{abs(hash(last_user)) % 100000:05d}.md"
-        if not out.exists():
-            out.write_text(
-                f"---\nconfidence: {confidence}\nsuggested_title: \ncreated: {ts}\n---\n\n{last_user}\n",
-                encoding="utf-8",
-            )
+        # 入库前查 inbox 是否已有 ≥90% 相似 — 避免每次 Stop hook 触发都重写一条
+        if not _scoring.is_duplicate_in_inbox(cfg, last_user):
+            ts = dt.datetime.now(dt.timezone.utc).strftime("%Y%m%dT%H%M%S")
+            out = cfg.inbox_dir / f"{ts}-{abs(hash(last_user)) % 100000:05d}.md"
+            if not out.exists():
+                out.write_text(
+                    f"---\nconfidence: {confidence}\nsuggested_title: \ncreated: {ts}\n---\n\n{last_user}\n",
+                    encoding="utf-8",
+                )
     except Exception:
         pass
 

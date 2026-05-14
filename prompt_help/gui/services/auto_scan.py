@@ -107,17 +107,20 @@ class AutoScanWorker(QThread):
                 passed, _reason = quality.is_quality_prompt(raw.text, qc)
                 if not passed:
                     continue
-                # 写到 inbox（用 hash 去重）
+                # 写到 inbox（先 hash 完全相同去重 → 再 ≥90% 相似查重）
                 body = raw.text.strip()
                 h = f"{abs(hash(body)) % 100000:05d}"
                 if h in inbox_hashes:
+                    continue
+                # 入库前查 inbox 是否已有 ≥90% 相似 — 治本不让 inbox 长出重复
+                from ...core import scoring as _scoring
+                if _scoring.is_duplicate_in_inbox(self.cfg, body):
                     continue
                 inbox_hashes.add(h)
                 ts = dt.datetime.now(dt.timezone.utc).strftime("%Y%m%dT%H%M%S")
                 out = self.cfg.inbox_dir / f"{ts}-{h}.md"
                 # 真实 confidence：基于 (1) 与库重合度 (2) 内容长度
                 # 之前硬编码 0.6 让 UI 显示假"匹配度"，现在按 stop.py 同款公式算
-                from ...core import scoring as _scoring
                 confidence = _scoring.compute_confidence(self.cfg, body)
                 try:
                     # 入 inbox 时也打 action_tag（规则识别，不调 LLM 避免拖慢扫描）
